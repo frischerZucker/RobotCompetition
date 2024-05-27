@@ -1,3 +1,6 @@
 nbproject/*
 Makefile
 .generated_files/*
+/build/
+/dist/
+flash.sh
