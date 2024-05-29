@@ -7,9 +7,15 @@
 
 #include <avr/io.h>
 
+// ADC-channels
+#define ADC0 0
+#define ADC1 1
+#define ADC2 2
+#define ADC3 3
+
 void UART_init(){
     // 8000000L/(16*2400)-1
-    unsigned int ubrr = 208;
+    unsigned int ubrr = 207;
     // baud-rate
     UBRRH = (unsigned char)(ubrr>>8);
     UBRRL = (unsigned char)ubrr;
@@ -24,8 +30,6 @@ void UART_send(char msg){
     while(!(UCSRA & (1<<UDRE)));
     // writing the data
     UDR = msg;
-    // waiting until sending is completed
-    while(!(UCSRA & (1<<TXC)));
 }
 // recieves one byte via UART
 char UART_recieve(){
@@ -70,16 +74,25 @@ char ADC_get_value(char adc_channel){
     return result;
 }
 
+void rotate_to_lightsource(){
+    unsigned char mean = 0;
+    unsigned char values = 0;
+    
+    values = ADC_get_value(ADC0);
+    
+    
+}
+
 /*
  * 
  */
 int main(int argc, char** argv) {
 
     UART_init();
-    ADC_init();
+    //ADC_init();
     
     while(1){
-        UART_send(0);
+        UART_send('0');
     }
 }
 
