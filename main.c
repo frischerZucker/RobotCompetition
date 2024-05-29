@@ -50,14 +50,26 @@ void UART_send_string(char *msg, char len){
 }
 
 void ADC_init(){
-    
+    // AVcc with external C at AREF-Pin, left adjusted result 
+    ADMUX = (1<<REFS0) | (1<<ADLAR);
+    // enable ADC, prescaler 64
+    ADCSRA = (1<<ADEN) | (1<<ADPS2) | (1<<ADPS1);
 }
 /*
  * starts a conversion of the given ADC-channel and returns thre result
  * c: ADC-channel
  */
 char ADC_get_value(char c){
+    char result;
+    // select the requested ADC-channel
+    ADMUX |= (c<<MUX0);
+    // start conversion
+    ADCSRA |= (1<<ADSC);
+    // waiting for conversion to finish
+    while(ADCSRA & (1<<ADSC));
     
+    result = ADCH;
+    return result;
 }
 
 /*
@@ -66,9 +78,9 @@ char ADC_get_value(char c){
 int main(int argc, char** argv) {
 
     UART_init();
+    ADC_init();
     
     while(1){
-        
     }
 }
 
