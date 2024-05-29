@@ -6,7 +6,6 @@
  */
 
 #include <avr/io.h>
-#include <definitions.h>
 
 void UART_init(){
     // 8000000L/(16*2400)-1
@@ -57,12 +56,11 @@ void ADC_init(){
 }
 /*
  * starts a conversion of the given ADC-channel and returns thre result
- * c: ADC-channel
  */
-char ADC_get_value(char c){
+char ADC_get_value(char adc_channel){
     char result;
     // select the requested ADC-channel
-    ADMUX |= (c<<MUX0);
+    ADMUX |= (adc_channel<<MUX0);
     // start conversion
     ADCSRA |= (1<<ADSC);
     // waiting for conversion to finish
@@ -81,6 +79,7 @@ int main(int argc, char** argv) {
     ADC_init();
     
     while(1){
+        UART_send(0);
     }
 }
 
