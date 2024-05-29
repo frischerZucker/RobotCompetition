@@ -47,8 +47,8 @@ char UART_recieve(){
  */
 void UART_send_string(char *msg, char len){
     for(char i = 0; i < len; i++){
-        UART_send(msg[i]);
         if(msg[i] == '\0') break;
+        UART_send(msg[i]);
     }
 }
 
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     //ADC_init();
     
     while(1){
-        UART_send('0');
+        UART_send_string("test \0", 29);
     }
 }
 
