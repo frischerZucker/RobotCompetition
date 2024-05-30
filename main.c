@@ -72,7 +72,7 @@ char UART_recieve() {
  * len -> length of the string
  */
 void UART_send_string(char *msg, char len) {
-    for (char i = 0; i < len; i++) {
+    for (unsigned char i = 0; i < len; i++) {
         if (msg[i] == '\0') break;
         UART_send(msg[i]);
     }
