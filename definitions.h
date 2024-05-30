@@ -18,7 +18,7 @@ extern "C" {
     /*
      * R, L: 0...255
      */
-    void gaspedal(char R, char L);
+    void gaspedal(char L, char R);
     /*
      * 1: vorwärts, 0: rückwärts
      */
