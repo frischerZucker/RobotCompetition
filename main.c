@@ -13,6 +13,8 @@
 
 #define F_CPU 8000000L
 
+#define rote_beete 0
+
 // ADC-channels
 #define ADC0 0
 #define ADC1 1
@@ -193,11 +195,13 @@ int main(int argc, char** argv) {
     // turn on D2
     PORTD |= (1 << PD4);
 
-    UART_init();
-    ADC_init();
+    //UART_init();
+    //ADC_init();
 
     while (1) {
-        UART_send_string("test\0", 5);
+        
+        UART_send('A');
+ 
     }
 }
 
