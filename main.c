@@ -22,13 +22,13 @@
 #define ADC2 2
 #define ADC3 3
 
-#define ADC_TRANSISTOR_LEFT ADC2
-#define ADC_TRANSISTOR_RIGHT ADC0
-// how bright the lights AC-component has to be, to be considered as HIGH
-#define EDGE_HEIGHT_THRESHOLD 10 // its just a random number , needs to be tested irl
+#define Q1 ADC2
+#define Q2 ADC3
 
-#define FORWARD 0
-#define BACKWARD 1
+#define ADC_TRANSISTOR_LEFT Q1
+#define ADC_TRANSISTOR_RIGHT Q2
+// how high a edge has to be to be considered as not noise
+#define EDGE_HEIGHT_THRESHOLD 10 // its just a random number , needs to be tested irl
 
 #define true 1
 #define false 0
@@ -36,7 +36,7 @@
 #define left 0
 #define right 1
 
-uint16_t global_time[2];
+uint16_t global_time_blinking_led[2];
 
 void UART_init() {
     DDRD |= (1<<PD1);
@@ -127,26 +127,29 @@ void timer1_init() {
 
 
 ISR(TIMER1_OVF_vect) {
-    global_time[left] += 1;
-    global_time[right] += 1;
+    global_time_blinking_led[left] += 1;
+    global_time_blinking_led[right] += 1;
 }
 
 /*
  * rotates the robot, until its facing the blinking lights
  * untested
  */
-void rotate_to_lightsource() {
+void turn_towards_blinking_led() {
     unsigned char mean[2] = {0, 0};
     // signed 16 bit, so that the substraction doesnt return a high result, if mean>transistor
     int16_t transistor[2] = {0, 0};
-    
+    // used for calculating the mean, so that the old mean has more weight as the new value
     float mean_weight = .9;
+
     unsigned char timer_started[2] = {false, false};
+    // some variables for noisecanceling the edge-detection
     unsigned char l_h = 0, l_l = 0, r_h = 0, r_l = 0;
+  
     unsigned char high_value[2] = {0, 0}, low_value[2] = {0, 0};
     
     unsigned char edge_height[2] = {0, 0};
-    
+    // time between a rising and a falling edge
     uint16_t time[2] = {0, 0};
     
     // reading the first values to get a reference value to compare new values to
@@ -157,14 +160,12 @@ void rotate_to_lightsource() {
     mean[right] = transistor[right];
 
     // start turning left
-    //gangschaltung(BACKWARD, FORWARD);
-    //gaspedal(50, 50);
 
     while (1) {
         transistor[left] = ADC_get_value(ADC_TRANSISTOR_LEFT);
         transistor[right] = ADC_get_value(ADC_TRANSISTOR_RIGHT);
     
-        // gewichteter mittelwert, alter mittelwert geht mehr ein als neuer wert
+        // calculates the mean, old mean has more weight then the new value of the transistor
         mean[left] = mean_weight*mean[left] + (1-mean_weight)*transistor[left];
         mean[right] = mean_weight*mean[right] + (1-mean_weight)*transistor[right];
         // detecting rising / falling edges on the left transistor
@@ -175,7 +176,7 @@ void rotate_to_lightsource() {
             if(l_h == 5){
                 // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
                 if (!timer_started[left]) {
-                    global_time[left] = 0;
+                    global_time_blinking_led[left] = 0;
                     high_value[left] = transistor[left];
                     
                     timer_started[left] = true;
@@ -191,7 +192,7 @@ void rotate_to_lightsource() {
             if(l_l == 5){
                 // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
                 if(timer_started[left]) {
-                    time[left] = global_time[left] * 2;
+                    time[left] = global_time_blinking_led[left] * 2;
                     low_value[left] = transistor[left];
                 }    
                 
@@ -208,7 +209,7 @@ void rotate_to_lightsource() {
             if(r_h == 5){
                 // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
                 if (!timer_started[right]) {
-                    global_time[right] = 0;
+                    global_time_blinking_led[right] = 0;
                     high_value[right] = transistor[right];
                     
                     timer_started[right] = true;
@@ -224,7 +225,7 @@ void rotate_to_lightsource() {
             if(r_l == 5){
                 // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
                 if(timer_started[right]) {
-                    time[right] = global_time[right] * 2;
+                    time[right] = global_time_blinking_led[right] * 2;
                     low_value[right] = transistor[right];
                 }    
                 
@@ -235,29 +236,35 @@ void rotate_to_lightsource() {
         
         // wenn gemessene zeit ~100ms -> blinken erkannt
         if (time[left] >= 50 && time[left] <= 150){
+#ifdef DEBUG
             PORTD &= ~(1<<PD5);
-            
+#endif
             edge_height[left] = high_value[left] - low_value[left];
-            UART_send(edge_height[left]);
         }
+#ifdef DEBUG
         else{
              PORTD |= (1<<PD5);
         }
+#endif
         if (time[right] >= 50 && time[right] <= 150){
+#ifdef DEBUG
             PORTD &= ~(1<<PD4);
-           
+#endif
             edge_height[right] = high_value[right] - low_value[right];
             //UART_send(edge_height[right]);
         }
+#ifdef DEBUG
         else{
              PORTD |= (1<<PD4);
         }
+#endif
         
         /* 
          * if both are almost equal, the robot should be facing the light
          * doesnt trigger if the left one is below a specified value, so that it doesnt trigger at 0
          */
         if((edge_height[left] >= (edge_height[right] - 10)) && (edge_height[left] <= (edge_height[right] + 10)) && (edge_height[left] > EDGE_HEIGHT_THRESHOLD)){
+            // stop rotating
             //return;
         }
         // turn in the direction of the brighter light
@@ -285,7 +292,7 @@ int main(int argc, char** argv) {
     
     while (1) {
              
-        rotate_to_lightsource();
+        turn_towards_blinking_led();
     }
 }
 
