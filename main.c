@@ -6,12 +6,13 @@
  */
 
 #include <avr/io.h>
+
+#define F_CPU 8000000L
 #include <avr/delay.h>
+#include <avr/interrupt.h>
 
 // if defined, debug info is send via UART
 #define DEBUG
-
-#define F_CPU 8000000L
 
 #define rote_beete 0
 
@@ -22,23 +23,26 @@
 #define ADC3 3
 
 #define ADC_TRANSISTOR_LEFT ADC2
-#define ADC_TRANSISTOR_RIGHT ADC3
+#define ADC_TRANSISTOR_RIGHT ADC0
 // how bright the lights AC-component has to be, to be considered as HIGH
-#define LIGHT_HIGH_THRESHOLD 50 // its just a random number , needs to be tested irl
+#define LIGHT_HIGH_THRESHOLD 10 // its just a random number , needs to be tested irl
 
 #define FORWARD 0
 #define BACKWARD 1
 
-// dummy functions for controlling the motors
-void gaspedal(char l, char r);
-void gangschaltung(char l, char r);
+#define true 1
+#define false 0
+
+uint16_t global_time;
 
 void UART_init() {
+    DDRD |= (1<<PD1);
+    
     // 8000000L/(16*2400)-1
     unsigned int ubrr = 207;
     // baud-rate
     UBRRH = (unsigned char) (ubrr >> 8);
-    UBRRL = (unsigned char) ubrr;
+    UBRRL = (unsigned char) (ubrr);
     //enable reciever and transmitter
     UCSRB = (1 << RXEN) | (1 << TXEN);
     // 8 bit data, 1 stop-bit, no parity
@@ -106,83 +110,103 @@ char ADC_get_value(char adc_channel) {
     return result;
 }
 
+void timer1_init() {
+    // Set Timer1 to Fast PWM mode
+    TCCR1A |= (1 << WGM10) | (1<< COM1A1) | (1<< COM1B1); // Fast PWM
+    TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // Prescaler 64
+ 
+    // Enable Timer1 overflow interrupt
+    TIMSK |= (1 << TOIE1);
+   
+    sei(); // Enable global interrupts
+}
+
+
+
+ISR(TIMER1_OVF_vect) {
+    global_time += 1;
+}
+
 /*
  * rotates the robot, until its facing the blinking lights
  * untested
  */
 void rotate_to_lightsource() {
-    unsigned char mean = 0;
-    unsigned char transistor_left = 0, transistor_right = 0;
-
+    unsigned char mean_l = 0, mean_r = 0;
+    // signed 16 bit, so that the substraction doesnt return a high result, if mean>transistor
+    int16_t transistor_l = 0, transistor_r = 0;
+    
+    float mean_weight = .9;
+    unsigned char timer_started_l = false;
+    unsigned char l_h = 0, l_l = 0;
+    unsigned char high_l = 0, low_l = 0;
+    
+    unsigned char edge_height = 0;
+    
+    uint16_t time = 0;
+    
     // reading the first values to get a reference value to compare new values to
-    transistor_left = ADC_get_value(ADC_TRANSISTOR_LEFT);
-    transistor_right = ADC_get_value(ADC_TRANSISTOR_RIGHT);
-    mean = (transistor_left + transistor_right) / 2;
+    transistor_l = ADC_get_value(ADC_TRANSISTOR_LEFT);
+    transistor_r = ADC_get_value(ADC_TRANSISTOR_RIGHT);
+    
+    mean_l = transistor_l;
+    mean_r = transistor_r;
 
     // start turning left
-    gangschaltung(BACKWARD, FORWARD);
-    gaspedal(50, 50);
+    //gangschaltung(BACKWARD, FORWARD);
+    //gaspedal(50, 50);
 
     while (1) {
-        // delay to match the sampling rate roughly to the flashing LEDs frequency (5 Hz =^ 200 ms)
-        _delay_ms(100);
+        transistor_l = ADC_get_value(ADC_TRANSISTOR_LEFT);
+        transistor_r = ADC_get_value(ADC_TRANSISTOR_RIGHT);
+    
+        // gewicchteter mittelwert, alter mittelwert geht mehr ein als neuer wert
+        mean_l = mean_weight*mean_l + (1-mean_weight)*transistor_l;
+        mean_r = mean_weight*mean_r + (1-mean_weight)*transistor_r;
+        
+        if(transistor_l > mean_l){
+            l_h += 1;
+            l_l = 0;    // setzt rauschabblockung für low zurück, weil ein high kam
+            // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+            if(l_h == 5){
+                // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
+                if (!timer_started_l) {
+                    global_time = 0;
+                    high_l = transistor_l;
+                    
+                    timer_started_l = true;
+                }
 
-        transistor_left = ADC_get_value(ADC_TRANSISTOR_LEFT);
-        transistor_right = ADC_get_value(ADC_TRANSISTOR_RIGHT);
-
-        // update reference (DC-component)
-        mean = (mean + transistor_left + transistor_right) / 3;
-
-#ifdef DEBUG
-        UART_send(';');
-        UART_send(transistor_left);
-        UART_send(transistor_right);
-#endif
-
-        /* 
-         * removing the DC-component from the values -> filter that lets only the blinking light pass
-         * if sampling rate matches the frequency of the LEDs, there should be a square signal with low and high levels
-         */
-        transistor_left -= mean;
-        transistor_right -= mean;
-
-#ifdef DEBUG
-        UART_send(mean);
-        UART_send(transistor_left);
-        UART_send(transistor_right);
-#endif
-
-        if (transistor_left < LIGHT_HIGH_THRESHOLD && transistor_right < LIGHT_HIGH_THRESHOLD) {
-            // both transistors dont notice a flashing light -> turn left
-            gangschaltung(BACKWARD, FORWARD);
-#ifdef DEBUG
-            UART_send('l');
-#endif
-        } else if (transistor_left > LIGHT_HIGH_THRESHOLD && transistor_left < LIGHT_HIGH_THRESHOLD) {
-            // only the left transistor notices a flashing light -> turn left
-            gangschaltung(BACKWARD, FORWARD);
-#ifdef DEBUG
-            UART_send('l');
-#endif
-        } else if (transistor_left < LIGHT_HIGH_THRESHOLD && transistor_right > LIGHT_HIGH_THRESHOLD) {
-            // only the right transistor notices a flashing light -> turn right
-            gangschaltung(FORWARD, BACKWARD);
-#ifdef DEBUG
-            UART_send('r');
-#endif
-        } else {
-            /*
-             * both transistors notice a flashing light -> stop rotating and return from the function
-             * 
-             * maybe this will be enough, but i think we will have to look for the point where they both get the max amount of light
-             */
-            gaspedal(0, 0);
-            gangschaltung(FORWARD, FORWARD);
-#ifdef DEBUG
-            UART_send('x');
-#endif
-            return;
+                l_h = 0;
+            }
         }
+        else {
+            l_l += 1;
+            l_h = 0;
+            // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+            if(l_l == 5){
+                // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
+                if(timer_started_l) {
+                    time = global_time * 2;
+                    low_l = transistor_l;
+                }    
+                
+                timer_started_l = false;
+                l_l = 0;
+            }
+        }
+        
+        // wenn gemessene zeit ~100ms -> blinken erkannt
+        if (time >= 50 && time <= 150){
+            PORTD &= ~(1<<PD5);
+        }
+        else{
+             PORTD |= (1<<PD5);
+        }
+        
+        
+        
+        //height = high_l - low_l;
     }
 }
 
@@ -195,12 +219,13 @@ int main(int argc, char** argv) {
     // turn on D2
     PORTD |= (1 << PD4);
 
-    //UART_init();
-    //ADC_init();
-
+    UART_init();
+    ADC_init();
+    timer1_init();
+    
     while (1) {
-        
-        UART_send('A');
+             
+        rotate_to_lightsource();
  
     }
 }
