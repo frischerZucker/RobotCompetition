@@ -87,7 +87,6 @@ void UART_send_string(char *msg, char len) {
     }
 }
 
-// untested
 void ADC_init() {
     // AVcc with external C at AREF-Pin, left adjusted result 
     ADMUX = (1 << REFS0) | (1 << ADLAR);
@@ -97,7 +96,6 @@ void ADC_init() {
 
 /*
  * starts a conversion of the given ADC-channel and returns the result
- * untested
  */
 char ADC_get_value(char adc_channel) {
     char result;
@@ -124,16 +122,16 @@ void timer1_init() {
     sei(); // Enable global interrupts
 }
 
-
-
+/*
+ * interrupt when timer1 is overflowing
+ */
 ISR(TIMER1_OVF_vect) {
     global_time_blinking_led[left] += 1;
     global_time_blinking_led[right] += 1;
 }
 
 /*
- * rotates the robot, until its facing the blinking lights
- * untested
+ * rotates the robot until its facing the blinking leds
  */
 void turn_towards_blinking_led() {
     unsigned char mean[2] = {0, 0};
@@ -171,8 +169,8 @@ void turn_towards_blinking_led() {
         // detecting rising / falling edges on the left transistor
         if(transistor[left] > mean[left]){
             l_h += 1;
-            l_l = 0;    // setzt rauschabblockung für low zurück, weil ein high kam
-            // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+            l_l = 0;    // setzt rauschabblockung fÃ¼r low zurÃ¼ck, weil ein high kam
+            // wird nur als high erkannt, wenn mehrmals am stÃ¼ck high gewesen -> blockt rauschen ab
             if(l_h == 5){
                 // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
                 if (!timer_started[left]) {
@@ -188,7 +186,7 @@ void turn_towards_blinking_led() {
         else {
             l_l += 1;
             l_h = 0;
-            // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+            // wird nur als low erkannt, wenn mehrmals am stÃ¼ck low gewesen -> blockt rauschen ab
             if(l_l == 5){
                 // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
                 if(timer_started[left]) {
@@ -204,8 +202,8 @@ void turn_towards_blinking_led() {
         // detecting rising / falling edges on the right transistor
         if(transistor[right] > mean[right]){
             r_h += 1;
-            r_l = 0;    // setzt rauschabblockung für low zurück, weil ein high kam
-            // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+            r_l = 0;    // setzt rauschabblockung fÃ¼r low zurÃ¼ck, weil ein high kam
+            // wird nur als high erkannt, wenn mehrmals am stÃ¼ck high gewesen -> blockt rauschen ab
             if(r_h == 5){
                 // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
                 if (!timer_started[right]) {
@@ -221,7 +219,7 @@ void turn_towards_blinking_led() {
         else {
             r_l += 1;
             r_h = 0;
-            // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+            // wird nur als low erkannt, wenn mehrmals am stÃ¼ck low gewesen -> blockt rauschen ab
             if(r_l == 5){
                 // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
                 if(timer_started[right]) {
