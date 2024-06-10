@@ -28,7 +28,9 @@
 #define ADC_TRANSISTOR_LEFT Q1
 #define ADC_TRANSISTOR_RIGHT Q2
 // how high a edge has to be to be considered as not noise
-#define EDGE_HEIGHT_THRESHOLD 5 // its just a random number , needs to be tested irl
+#define EDGE_HEIGHT_THRESHOLD 5
+// for calculating the mean, so that the old mean has more weight as the new value
+#define MEAN_WEIGHT .9f
 
 #define true 1
 #define false 0
@@ -57,15 +59,13 @@ void Gangschaltung(char richtung_L, char richtung_R) {
     // 1 = vorwärts    0 = rückwärts
     if (richtung_L == 0) {
         PORTD &= ~(1 << PD6);
-    }
-    else {
+    } else {
         PORTD |= (1 << PD6);
     }
 
     if (richtung_R == 0) {
         PORTD &= ~(1 << PD7);
-    }
-    else {
+    } else {
         PORTD |= (1 << PD7);
     }
 }
@@ -178,37 +178,21 @@ ISR(TIMER1_OVF_vect) {
 }
 
 /*
- * rotates the robot, until its facing the blinking lights
- * untested
+ * calculates how bright the flashing light is from each transistors POV
  */
-void turn_towards_blinking_led() {
-    float p = 1.5; //small value lets it turn a little and big values make it turn quicker
-    float i = .0; //it helps to stop the robot from oscilating, but if the value is to big it makes the opposite
-    float d = .0; //the quicker the curve comes, the higher the steering effect
-
-    int error = 0; //Difference
-    int P = error;
-    float I = error;
-    int lastError = error;
-    float D = error - lastError;
-    int steer = P * p + I * i + D*d;
-    
-    
-    unsigned char mean[2] = {0, 0};
+void get_flashing_led_brightness(unsigned char *edge_height) {
+    static unsigned char mean[2] = {0, 0};
     // signed 16 bit, so that the substraction doesnt return a high result, if mean>transistor
-    int16_t transistor[2] = {0, 0};
-    // used for calculating the mean, so that the old mean has more weight as the new value
-    float mean_weight = .9;
+    static int16_t transistor[2] = {0, 0};
 
-    unsigned char timer_started[2] = {false, false};
+    static unsigned char timer_started[2] = {false, false};
     // some variables for noisecanceling the edge-detection
-    unsigned char l_h = 0, l_l = 0, r_h = 0, r_l = 0;
+    static unsigned char l_h = 0, l_l = 0, r_h = 0, r_l = 0;
 
-    unsigned char high_value[2] = {0, 0}, low_value[2] = {0, 0};
+    static unsigned char high_value[2] = {0, 0}, low_value[2] = {0, 0};
 
-    unsigned char edge_height[2] = {0, 0};
     // time between a rising and a falling edge
-    uint16_t time[2] = {0, 0};
+    static uint16_t time[2] = {0, 0};
 
     // reading the first values to get a reference value to compare new values to
     transistor[LEFT] = ADC_get_value(ADC_TRANSISTOR_LEFT);
@@ -217,135 +201,100 @@ void turn_towards_blinking_led() {
     mean[LEFT] = transistor[LEFT];
     mean[RIGHT] = transistor[RIGHT];
 
-    // start turning left
-    Gangschaltung(BACKWARD, FORWARD);
-    Gaspedal(50, 60);
+    transistor[LEFT] = ADC_get_value(ADC_TRANSISTOR_LEFT);
+    transistor[RIGHT] = ADC_get_value(ADC_TRANSISTOR_RIGHT);
 
-    while (1) {
-        transistor[LEFT] = ADC_get_value(ADC_TRANSISTOR_LEFT);
-        transistor[RIGHT] = ADC_get_value(ADC_TRANSISTOR_RIGHT);
+    // calculates the mean, old mean has more weight then the new value of the transistor
+    mean[LEFT] = MEAN_WEIGHT * mean[LEFT] + (1 - MEAN_WEIGHT) * transistor[LEFT];
+    mean[RIGHT] = MEAN_WEIGHT * mean[RIGHT] + (1 - MEAN_WEIGHT) * transistor[RIGHT];
+    // detecting rising / falling edges on the left transistor
+    if (transistor[LEFT] > mean[LEFT]) {
+        l_h += 1;
+        l_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+        if (l_h == 5) {
+            // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
+            if (!timer_started[LEFT]) {
+                global_time_blinking_led[LEFT] = 0;
+                high_value[LEFT] = transistor[LEFT];
 
-        // calculates the mean, old mean has more weight then the new value of the transistor
-        mean[LEFT] = mean_weight * mean[LEFT] + (1 - mean_weight) * transistor[LEFT];
-        mean[RIGHT] = mean_weight * mean[RIGHT] + (1 - mean_weight) * transistor[RIGHT];
-        // detecting rising / falling edges on the left transistor
-        if (transistor[LEFT] > mean[LEFT]) {
-            l_h += 1;
-            l_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
-            // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
-            if (l_h == 5) {
-                // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
-                if (!timer_started[LEFT]) {
-                    global_time_blinking_led[LEFT] = 0;
-                    high_value[LEFT] = transistor[LEFT];
-
-                    timer_started[LEFT] = true;
-                }
-
-                l_h = 0;
+                timer_started[LEFT] = true;
             }
-        } else {
-            l_l += 1;
+
             l_h = 0;
-            // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
-            if (l_l == 5) {
-                // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
-                if (timer_started[LEFT]) {
-                    time[LEFT] = global_time_blinking_led[LEFT] * 2;
-                    low_value[LEFT] = transistor[LEFT];
-                }
-
-                timer_started[LEFT] = false;
-                l_l = 0;
+        }
+    } else {
+        l_l += 1;
+        l_h = 0;
+        // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+        if (l_l == 5) {
+            // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
+            if (timer_started[LEFT]) {
+                time[LEFT] = global_time_blinking_led[LEFT] * 2;
+                low_value[LEFT] = transistor[LEFT];
             }
-        }
 
-        // detecting rising / falling edges on the right transistor
-        if (transistor[RIGHT] > mean[RIGHT]) {
-            r_h += 1;
-            r_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
-            // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
-            if (r_h == 5) {
-                // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
-                if (!timer_started[RIGHT]) {
-                    global_time_blinking_led[RIGHT] = 0;
-                    high_value[RIGHT] = transistor[RIGHT];
-
-                    timer_started[RIGHT] = true;
-                }
-
-                r_h = 0;
-            }
-        } else {
-            r_l += 1;
-            r_h = 0;
-            // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
-            if (r_l == 5) {
-                // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
-                if (timer_started[RIGHT]) {
-                    time[RIGHT] = global_time_blinking_led[RIGHT] * 2;
-                    low_value[RIGHT] = transistor[RIGHT];
-                }
-
-                timer_started[RIGHT] = false;
-                r_l = 0;
-            }
-        }
-
-        // wenn gemessene zeit ~100ms -> blinken erkannt
-        if (time[LEFT] >= 50 && time[LEFT] <= 150) {
-#ifdef DEBUG
-            PORTD &= ~(1 << PD5);
-#endif
-            edge_height[LEFT] = high_value[LEFT] - low_value[LEFT];
-        }
-#ifdef DEBUG
-        else {
-            PORTD |= (1 << PD5);
-        }
-#endif
-        if (time[RIGHT] >= 50 && time[RIGHT] <= 150) {
-#ifdef DEBUG
-            PORTD &= ~(1 << PD4);
-#endif
-            edge_height[RIGHT] = high_value[RIGHT] - low_value[RIGHT];
-            //UART_send(edge_height[right]);
-        }
-#ifdef DEBUG
-        else {
-            PORTD |= (1 << PD4);
-        }
-#endif
-
-        /* 
-         * if both are almost equal, the robot should be facing the light
-         * doesnt trigger if the left one is below a specified value, so that it doesnt trigger at 0
-         */
-
-        if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) continue;
-
-        error = edge_height[LEFT] - edge_height[RIGHT];
-        P = error;
-        I = I + error;
-        lastError = error;
-        D = error - lastError;
-        steer = P * p + I * i + D*d;
-        
-        // turn in the direction of the brighter light
-        if (edge_height[LEFT] > edge_height[RIGHT]) {
-            // turn left
-            Gangschaltung(FORWARD, FORWARD);
-            if (steer > 127) steer = 100;
-            else if (steer < 0) steer = 0;
-            Gaspedal(127 - steer, 127 + steer);
-        } else if (edge_height[LEFT] < edge_height[RIGHT]) {
-            // turn right
-            Gangschaltung(FORWARD, FORWARD);
-            if (steer > 127) steer = 100;
-            else if (steer < 0) steer = 0;
-            Gaspedal(127 + steer, 127 - steer);
+            timer_started[LEFT] = false;
+            l_l = 0;
         }
     }
+
+    // detecting rising / falling edges on the right transistor
+    if (transistor[RIGHT] > mean[RIGHT]) {
+        r_h += 1;
+        r_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+        if (r_h == 5) {
+            // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
+            if (!timer_started[RIGHT]) {
+                global_time_blinking_led[RIGHT] = 0;
+                high_value[RIGHT] = transistor[RIGHT];
+
+                timer_started[RIGHT] = true;
+            }
+
+            r_h = 0;
+        }
+    } else {
+        r_l += 1;
+        r_h = 0;
+        // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+        if (r_l == 5) {
+            // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
+            if (timer_started[RIGHT]) {
+                time[RIGHT] = global_time_blinking_led[RIGHT] * 2;
+                low_value[RIGHT] = transistor[RIGHT];
+            }
+
+            timer_started[RIGHT] = false;
+            r_l = 0;
+        }
+    }
+
+    // wenn gemessene zeit ~100ms -> blinken erkannt
+    if (time[LEFT] >= 50 && time[LEFT] <= 150) {
+#ifdef DEBUG
+        PORTD &= ~(1 << PD5);
+#endif
+        edge_height[LEFT] = high_value[LEFT] - low_value[LEFT];
+    }
+#ifdef DEBUG
+else {
+        PORTD |= (1 << PD5);
+    }
+#endif
+    if (time[RIGHT] >= 50 && time[RIGHT] <= 150) {
+#ifdef DEBUG
+        PORTD &= ~(1 << PD4);
+#endif
+        edge_height[RIGHT] = high_value[RIGHT] - low_value[RIGHT];
+        //UART_send(edge_height[right]);
+    }
+#ifdef DEBUG
+else {
+        PORTD |= (1 << PD4);
+    }
+#endif
 }
 
 /*
@@ -362,9 +311,44 @@ int main(int argc, char** argv) {
     timer1_init();
     init_M();
 
+    // regulator
+    float p = 1.5; //small value lets it turn a little and big values make it turn quicker
+    float i = .0; //it helps to stop the robot from oscilating, but if the value is to big it makes the opposite
+    float d = .0; //the quicker the curve comes, the higher the steering effect
+    int error = 0; //Difference
+    int P = error;
+    float I = error;
+    int lastError = error;
+    float D = error - lastError;
+    int steer = P * p + I * i + D*d;
+
+    unsigned char edge_height[2] = {0, 0};
+
     while (1) {
 
-        turn_towards_blinking_led();
+        get_flashing_led_brightness(edge_height);
+        
+        // no flashing led detected -> rotate left
+        if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)){
+            Gangschaltung(BACKWARD, FORWARD);
+            Gaspedal(60, 70);
+        }
+        else{
+            // drive towards the flashing led, steered by a pid-regulator
+            
+            error = edge_height[LEFT] - edge_height[RIGHT];
+            P = error;
+            I = I + error;
+            lastError = error;
+            D = error - lastError;
+            steer = P * p + I * i + D*d;
+            
+            if (steer > 127) steer = 100;
+            else if (steer < 0) steer = 0;
+            
+            Gangschaltung(FORWARD, FORWARD);
+            Gaspedal(127 - steer, 127 + steer);
+        }
     }
 }
 
