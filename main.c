@@ -194,19 +194,15 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     // time between a rising and a falling edge
     static uint16_t time[2] = {0, 0};
 
-    // reading the first values to get a reference value to compare new values to
-    transistor[LEFT] = ADC_get_value(ADC_TRANSISTOR_LEFT);
-    transistor[RIGHT] = ADC_get_value(ADC_TRANSISTOR_RIGHT);
-
-    mean[LEFT] = transistor[LEFT];
-    mean[RIGHT] = transistor[RIGHT];
-
     transistor[LEFT] = ADC_get_value(ADC_TRANSISTOR_LEFT);
     transistor[RIGHT] = ADC_get_value(ADC_TRANSISTOR_RIGHT);
 
     // calculates the mean, old mean has more weight then the new value of the transistor
-    mean[LEFT] = MEAN_WEIGHT * mean[LEFT] + (1 - MEAN_WEIGHT) * transistor[LEFT];
-    mean[RIGHT] = MEAN_WEIGHT * mean[RIGHT] + (1 - MEAN_WEIGHT) * transistor[RIGHT];
+    if (mean[LEFT] == 0) mean[LEFT] = transistor[LEFT]; // sets the mean to the value at the transistor in the first iteration
+    else mean[LEFT] = MEAN_WEIGHT * mean[LEFT] + (1 - MEAN_WEIGHT) * transistor[LEFT];
+    if (mean[LEFT] == 0) mean[LEFT] = transistor[LEFT]; // sets the mean to the value at the transistor in the first iteration
+    else mean[RIGHT] = MEAN_WEIGHT * mean[RIGHT] + (1 - MEAN_WEIGHT) * transistor[RIGHT];
+
     // detecting rising / falling edges on the left transistor
     if (transistor[LEFT] > mean[LEFT]) {
         l_h += 1;
@@ -279,7 +275,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
         edge_height[LEFT] = high_value[LEFT] - low_value[LEFT];
     }
 #ifdef DEBUG
-else {
+    else {
         PORTD |= (1 << PD5);
     }
 #endif
@@ -291,7 +287,7 @@ else {
         //UART_send(edge_height[right]);
     }
 #ifdef DEBUG
-else {
+    else {
         PORTD |= (1 << PD4);
     }
 #endif
@@ -327,25 +323,24 @@ int main(int argc, char** argv) {
     while (1) {
 
         get_flashing_led_brightness(edge_height);
-        
+
         // no flashing led detected -> rotate left
-        if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)){
+        if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
             Gangschaltung(BACKWARD, FORWARD);
             Gaspedal(60, 70);
-        }
-        else{
+        } else {
             // drive towards the flashing led, steered by a pid-regulator
-            
+
             error = edge_height[LEFT] - edge_height[RIGHT];
             P = error;
             I = I + error;
             lastError = error;
             D = error - lastError;
             steer = P * p + I * i + D*d;
-            
+
             if (steer > 127) steer = 100;
             else if (steer < 0) steer = 0;
-            
+
             Gangschaltung(FORWARD, FORWARD);
             Gaspedal(127 - steer, 127 + steer);
         }
