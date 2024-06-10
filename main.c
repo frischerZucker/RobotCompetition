@@ -56,7 +56,7 @@ void init_M(void) {
 
 void Gangschaltung(char richtung_L, char richtung_R) {
 
-    // 1 = vorwärts    0 = rückwärts
+    // 1 = vorwï¿½rts    0 = rï¿½ckwï¿½rts
     if (richtung_L == 0) {
         PORTD &= ~(1 << PD6);
     } else {
@@ -210,8 +210,8 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     // detecting rising / falling edges on the left transistor
     if (transistor[LEFT] > mean[LEFT]) {
         l_h += 1;
-        l_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
-        // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+        l_l = 0; // setzt rauschabblockung fï¿½r low zurï¿½ck, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am stï¿½ck high gewesen -> blockt rauschen ab
         if (l_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[LEFT]) {
@@ -226,7 +226,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     } else {
         l_l += 1;
         l_h = 0;
-        // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+        // wird nur als low erkannt, wenn mehrmals am stï¿½ck low gewesen -> blockt rauschen ab
         if (l_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[LEFT]) {
@@ -242,8 +242,8 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     // detecting rising / falling edges on the right transistor
     if (transistor[RIGHT] > mean[RIGHT]) {
         r_h += 1;
-        r_l = 0; // setzt rauschabblockung für low zurück, weil ein high kam
-        // wird nur als high erkannt, wenn mehrmals am stück high gewesen -> blockt rauschen ab
+        r_l = 0; // setzt rauschabblockung fï¿½r low zurï¿½ck, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am stï¿½ck high gewesen -> blockt rauschen ab
         if (r_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[RIGHT]) {
@@ -258,7 +258,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     } else {
         r_l += 1;
         r_h = 0;
-        // wird nur als low erkannt, wenn mehrmals am stück low gewesen -> blockt rauschen ab
+        // wird nur als low erkannt, wenn mehrmals am stï¿½ck low gewesen -> blockt rauschen ab
         if (r_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[RIGHT]) {
