@@ -44,7 +44,8 @@
 #define TRIG_PIN PD0
 #define ECHO_PIN PD3
 
-uint16_t global_time_blinking_led[2];
+uint16_t global_time_target_led_frequency[2];
+uint16_t time_status_led;
 
 volatile uint16_t overflowCount;
 volatile uint16_t pulseWidth;
@@ -59,7 +60,7 @@ void ext_int1_init() {
 
 float calculateDistance(uint16_t pulseWidth) {
     // Calculate distance in cm
-    float distance = pulseWidth* 0.0343 * 8  / 2; // distance in cm
+    float distance = pulseWidth * 0.0343 * 8 / 2; // distance in cm
     return distance;
 }
 
@@ -78,7 +79,7 @@ void trigSensor() {
     risingEdge = 1; // Prepare to detect rising edge again
     //UART_send(pulseWidth);
     MCUCR |= (1 << ISC10); // Rising edge
-    
+
     overflowCount = 0; // Reset overflow count
 }
 
@@ -91,7 +92,7 @@ void stopRobot() {
         trigSensor();
     }
 
-    
+
     float distance = calculateDistance(pulseWidth);
     //if(distance > 20) distance = 20;
     sei();
@@ -238,10 +239,12 @@ void timer1_init() {
 }
 
 ISR(TIMER1_OVF_vect) {
-    global_time_blinking_led[LEFT] += 1;
-    global_time_blinking_led[RIGHT] += 1;
-    
+    global_time_target_led_frequency[LEFT] += 1;
+    global_time_target_led_frequency[RIGHT] += 1;
+
     overflowCount++;
+
+    time_status_led += 1;
 }
 
 ISR(INT1_vect) {
@@ -298,7 +301,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
         if (l_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[LEFT]) {
-                global_time_blinking_led[LEFT] = 0;
+                global_time_target_led_frequency[LEFT] = 0;
                 high_value[LEFT] = transistor[LEFT];
 
                 timer_started[LEFT] = true;
@@ -313,7 +316,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
         if (l_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[LEFT]) {
-                time[LEFT] = global_time_blinking_led[LEFT] * 2;
+                time[LEFT] = global_time_target_led_frequency[LEFT] * 2;
                 low_value[LEFT] = transistor[LEFT];
             }
 
@@ -330,7 +333,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
         if (r_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[RIGHT]) {
-                global_time_blinking_led[RIGHT] = 0;
+                global_time_target_led_frequency[RIGHT] = 0;
                 high_value[RIGHT] = transistor[RIGHT];
 
                 timer_started[RIGHT] = true;
@@ -345,7 +348,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
         if (r_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[RIGHT]) {
-                time[RIGHT] = global_time_blinking_led[RIGHT] * 2;
+                time[RIGHT] = global_time_target_led_frequency[RIGHT] * 2;
                 low_value[RIGHT] = transistor[RIGHT];
             }
 
@@ -380,6 +383,19 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
 #endif
 }
 
+void status_led_blink(char status_led_should_blink) {
+    // turn off D2 if it shouldnt blink
+    if (!status_led_should_blink) {
+        PORTD |= (1 << PD5);
+        return;
+    }
+
+    if (time_status_led >= 500) {
+        PORTD ^= (1 << PD5);
+        time_status_led = 0;
+    }
+}
+
 /*
  * 
  */
@@ -395,7 +411,7 @@ int main(int argc, char** argv) {
     init_M();
     ext_int1_init();
     SensorInit();
-    
+
     overflowCount = 0;
     risingEdge = 1;
     pulseWidth = 0;
@@ -413,9 +429,13 @@ int main(int argc, char** argv) {
     int steer = P * p + I * i + D*d;
 
     unsigned char edge_height[2] = {0, 0};
+    
+    unsigned char status_led_should_blink = false;
 
     while (1) {
 
+        status_led_blink(status_led_should_blink);
+        
         get_flashing_led_brightness(edge_height);
 
         // no flashing led detected -> rotate left
@@ -440,16 +460,15 @@ int main(int argc, char** argv) {
                     if (steer > 127) steer = 100;
                     else if (steer < 0) steer = 0;
                     Gaspedal(127 - steer, 127 + steer);
-                } 
-            }
-            else if (edge_height[LEFT] < edge_height[RIGHT]) {
-                    // turn right
-                    Gangschaltung(FORWARD, FORWARD);
-                    if (steer > 127) steer = 100;
-                    else if (steer < 0) steer = 0;
-                    Gaspedal(127 + steer, 127 - steer);
                 }
+            } else if (edge_height[LEFT] < edge_height[RIGHT]) {
+                // turn right
+                Gangschaltung(FORWARD, FORWARD);
+                if (steer > 127) steer = 100;
+                else if (steer < 0) steer = 0;
+                Gaspedal(127 + steer, 127 - steer);
             }
         }
     }
+}
 
