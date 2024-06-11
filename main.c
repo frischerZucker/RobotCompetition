@@ -41,7 +41,72 @@
 #define FORWARD 1
 #define BACKWARD 0
 
+#define TRIG_PIN PD0
+#define ECHO_PIN PD3
+
 uint16_t global_time_blinking_led[2];
+
+volatile uint16_t overflowCount;
+volatile uint16_t pulseWidth;
+volatile uint8_t distanceMeasured;
+volatile uint8_t risingEdge;
+
+void ext_int1_init() {
+    // Set INT1 to trigger on rising edge
+    MCUCR |= (1 << ISC11) | (1 << ISC10); // Rising edge
+    GICR |= (1 << INT1); // Enable INT1 interrupt
+}
+
+float calculateDistance(uint16_t pulseWidth) {
+    // Calculate distance in cm
+    float distance = pulseWidth* 0.0343 * 8  / 2; // distance in cm
+    return distance;
+}
+
+void SensorInit() {
+    DDRD |= (1 << TRIG_PIN); // Set trigger pin as output
+    DDRD &= ~(1 << ECHO_PIN); // Set echo pin as input
+}
+
+void trigSensor() {
+    // Trigger the ultrasonic sensor
+    PORTD |= (1 << TRIG_PIN); // Send a 10us high pulse
+    _delay_us(10);
+    PORTD &= ~(1 << TRIG_PIN);
+    distanceMeasured = 0;
+
+    risingEdge = 1; // Prepare to detect rising edge again
+    //UART_send(pulseWidth);
+    MCUCR |= (1 << ISC10); // Rising edge
+    
+    overflowCount = 0; // Reset overflow count
+}
+
+void stopRobot() {
+    // without the first iterations before the distance is measured for the first time will trigger as distance < 8
+    static char c = 0;
+
+    cli();
+    if (((distanceMeasured == 1) && (overflowCount > 30)) || (overflowCount > 500)) {
+        trigSensor();
+    }
+
+    
+    float distance = calculateDistance(pulseWidth);
+    //if(distance > 20) distance = 20;
+    sei();
+
+    if (distance) c = 1;
+
+    if ((distance < 8) && c) {
+
+        PORTD &= ~(1 << PD5);
+    } else {
+        PORTD |= (1 << PD5);
+    }
+
+    //UART_send(distance); 
+}
 
 void init_M(void) {
     DDRB |= (1 << PB1) | (1 << PB2);
@@ -175,6 +240,28 @@ void timer1_init() {
 ISR(TIMER1_OVF_vect) {
     global_time_blinking_led[LEFT] += 1;
     global_time_blinking_led[RIGHT] += 1;
+    
+    overflowCount++;
+}
+
+ISR(INT1_vect) {
+    static uint8_t a;
+    if (risingEdge) {
+        // Rising edge detected
+        a = TCNT1; // read Timer1 value
+        //UART_send(a);
+        overflowCount = 0; // Reset overflow count
+        risingEdge = 0; // Prepare to detect falling edge
+        MCUCR &= ~(1 << ISC10); // Falling edge
+        //UART_send('r');
+
+    } else {
+        // Falling edge detected
+        pulseWidth = ((overflowCount * 256UL) + TCNT1) - a; // Calculate pulse width
+        distanceMeasured = 1; // Indicate that measurement is complete
+        //UART_send('f');
+
+    }
 }
 
 /*
@@ -306,6 +393,13 @@ int main(int argc, char** argv) {
     ADC_init();
     timer1_init();
     init_M();
+    ext_int1_init();
+    SensorInit();
+    
+    overflowCount = 0;
+    risingEdge = 1;
+    pulseWidth = 0;
+    distanceMeasured = 1;
 
     // regulator
     float p = 1.5; //small value lets it turn a little and big values make it turn quicker
