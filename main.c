@@ -383,13 +383,16 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
 #endif
 }
 
+/*
+ * toggles D2 every 500ms -> D2 is blinking with 1Hz if status_led_should_blink is set to true
+ */
 void status_led_blink(char status_led_should_blink) {
     // turn off D2 if it shouldnt blink
     if (!status_led_should_blink) {
         PORTD |= (1 << PD5);
         return;
     }
-
+    // toggles D2
     if (time_status_led >= 500) {
         PORTD ^= (1 << PD5);
         time_status_led = 0;
