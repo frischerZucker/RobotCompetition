@@ -330,7 +330,6 @@ int main(int argc, char** argv) {
             Gaspedal(60, 70);
         } else {
             // drive towards the flashing led, steered by a pid-regulator
-
             error = edge_height[LEFT] - edge_height[RIGHT];
             P = error;
             I = I + error;
@@ -338,12 +337,25 @@ int main(int argc, char** argv) {
             D = error - lastError;
             steer = P * p + I * i + D*d;
 
-            if (steer > 127) steer = 100;
-            else if (steer < 0) steer = 0;
-
-            Gangschaltung(FORWARD, FORWARD);
-            Gaspedal(127 - steer, 127 + steer);
+            // turn in the direction of the brighter light
+            if (edge_height[LEFT] > edge_height[RIGHT]) {
+                if (edge_height[LEFT] > edge_height[RIGHT]) {
+                    // turn left
+                } else {
+                    Gangschaltung(FORWARD, FORWARD);
+                    if (steer > 127) steer = 100;
+                    else if (steer < 0) steer = 0;
+                    Gaspedal(127 - steer, 127 + steer);
+                } 
+            }
+            else if (edge_height[LEFT] < edge_height[RIGHT]) {
+                    // turn right
+                    Gangschaltung(FORWARD, FORWARD);
+                    if (steer > 127) steer = 100;
+                    else if (steer < 0) steer = 0;
+                    Gaspedal(127 + steer, 127 - steer);
+                }
+            }
         }
     }
-}
 
