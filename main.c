@@ -44,6 +44,13 @@
 #define TRIG_PIN PD0
 #define ECHO_PIN PD3
 
+enum states_e {
+    IDLE,
+    SEARCH_TARGET,
+    DRIVE_TO_TARGET_1,
+    DRIVE_TO_TARGET_2,
+};
+
 uint16_t global_time_target_led_frequency[2];
 uint16_t time_status_led;
 
@@ -432,45 +439,81 @@ int main(int argc, char** argv) {
     int steer = P * p + I * i + D*d;
 
     unsigned char edge_height[2] = {0, 0};
-    
+
     unsigned char status_led_should_blink = false;
+
+    enum states_e state;
+    state = SEARCH_TARGET;
 
     while (1) {
 
         status_led_blink(status_led_should_blink);
-        
+
         get_flashing_led_brightness(edge_height);
 
-        // no flashing led detected -> rotate left
-        if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
-            Gangschaltung(BACKWARD, FORWARD);
-            Gaspedal(60, 70);
-        } else {
-            // drive towards the flashing led, steered by a pid-regulator
-            error = edge_height[LEFT] - edge_height[RIGHT];
-            P = error;
-            I = I + error;
-            lastError = error;
-            D = error - lastError;
-            steer = P * p + I * i + D*d;
-
-            // turn in the direction of the brighter light
-            if (edge_height[LEFT] > edge_height[RIGHT]) {
-                if (edge_height[LEFT] > edge_height[RIGHT]) {
-                    // turn left
+        switch (state) {
+            // rotating until the target-light is found
+            case SEARCH_TARGET:
+                // no flashing led detected -> rotate left
+                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
+                    Gangschaltung(BACKWARD, FORWARD);
+                    Gaspedal(60, 70);
                 } else {
-                    Gangschaltung(FORWARD, FORWARD);
-                    if (steer > 127) steer = 100;
-                    else if (steer < 0) steer = 0;
-                    Gaspedal(127 - steer, 127 + steer);
+                    // drive towards the flashing led, steered by a pid-regulator
+                    error = edge_height[LEFT] - edge_height[RIGHT];
+                    P = error;
+                    I = I + error;
+                    lastError = error;
+                    D = error - lastError;
+                    steer = P * p + I * i + D*d;
+
+                    // turn in the direction of the brighter light
+                    if (edge_height[LEFT] > edge_height[RIGHT]) {
+                        if (edge_height[LEFT] > edge_height[RIGHT]) {
+                            // turn left
+                        } else {
+                            Gangschaltung(FORWARD, FORWARD);
+                            if (steer > 127) steer = 100;
+                            else if (steer < 0) steer = 0;
+                            Gaspedal(127 - steer, 127 + steer);
+                        }
+                    } else if (edge_height[LEFT] < edge_height[RIGHT]) {
+                        // turn right
+                        Gangschaltung(FORWARD, FORWARD);
+                        if (steer > 127) steer = 100;
+                        else if (steer < 0) steer = 0;
+                        Gaspedal(127 + steer, 127 - steer);
+                    }
                 }
-            } else if (edge_height[LEFT] < edge_height[RIGHT]) {
-                // turn right
-                Gangschaltung(FORWARD, FORWARD);
-                if (steer > 127) steer = 100;
-                else if (steer < 0) steer = 0;
-                Gaspedal(127 + steer, 127 - steer);
-            }
+                break;
+
+            /*
+             * driving towards the target light ignoring black lines
+             * -> driving out of the starting zone
+             * go to state 2 shortly after a black line is detected
+             */
+            case DRIVE_TO_TARGET_1:
+                
+                break;
+            
+            /*
+             * driving towards the target light, avoiding black lines
+             * go to idle state if the distance to the target is small enough
+             */
+            case DRIVE_TO_TARGET_2:
+                
+                break;
+                
+            /*
+             * idle, does nothing
+             */
+            case IDLE:
+                break;
+                
+            // catches random unintended states and reroutes them to state 0
+            default:
+                state = 0;
+                break;
         }
     }
 }
