@@ -10,6 +10,7 @@
 #define F_CPU 8000000L
 #include <avr/delay.h>
 #include <avr/interrupt.h>
+#include <stdint-gcc.h>
 
 // if defined, debug info is send via UART
 //#define DEBUG
@@ -61,6 +62,8 @@ enum states_e {
 
 uint16_t global_time_target_led_frequency[2];
 uint16_t time_status_led;
+uint16_t ms_since_last_second;
+uint16_t seconds_since_start;
 
 volatile uint16_t overflowCount;
 volatile uint16_t pulseWidth;
@@ -257,6 +260,8 @@ ISR(TIMER1_OVF_vect) {
     overflowCount++;
 
     time_status_led += 1;
+    
+    ms_since_last_second += 2;
 }
 
 ISR(INT1_vect) {
@@ -471,6 +476,10 @@ int main(int argc, char** argv) {
         right_sensor_value = ADC_get_value(SENSOR_RIGHT);
 
         //stopRobot();
+        if(ms_since_last_second >= 1000){
+            ms_since_last_second = 0;
+            seconds_since_start += 1;
+        }
 
         switch (state) {
                 // rotating until the target-light is found
@@ -526,11 +535,6 @@ int main(int argc, char** argv) {
                     Gaspedal(127 + steer, 127 - steer);
                 }*/
 
-                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
-                    state = STATE_TARGET_LOST;
-                    break;
-                }
-
                 // stops if close to the target
                 distance_to_target = get_distance_to_target();
                 if ((distance_to_target < STOP_DISTANCE)) {
@@ -538,6 +542,21 @@ int main(int argc, char** argv) {
                     Gaspedal(0, 0);
                     Gangschaltung(FORWARD, FORWARD);
                     status_led_should_blink = false;
+                    break;
+                }
+                
+                // unstuck the robot
+                if (seconds_since_start >= 20) {
+                    state = STATE_DRIVE_TO_TARGET_2;
+                    Gaspedal(0, 0);
+                    Gangschaltung(FORWARD, FORWARD);
+                    seconds_since_start = 0;
+
+                    break;
+                }
+                
+                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
+                    state = STATE_TARGET_LOST;
                     break;
                 }
 
@@ -594,7 +613,17 @@ int main(int argc, char** argv) {
                  * go to idle state if the distance to the target is small enough
                  */
             case STATE_DRIVE_TO_TARGET_2:
+                Gangschaltung(BACKWARD, BACKWARD);
+                Gaspedal(50, 80);
+                
+                if (seconds_since_start >= 2) {
+                    state = STATE_SEARCH_TARGET;
+                    Gaspedal(0, 0);
+                    Gangschaltung(FORWARD, FORWARD);
+                    seconds_since_start = 0;
 
+                    break;
+                }
 
                 break;
 
