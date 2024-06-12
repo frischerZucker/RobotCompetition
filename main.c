@@ -12,7 +12,7 @@
 #include <avr/interrupt.h>
 
 // if defined, debug info is send via UART
-#define DEBUG
+//#define DEBUG
 
 #define rote_beete 0
 
@@ -38,17 +38,19 @@
 #define LEFT 0
 #define RIGHT 1
 
-#define FORWARD 1
-#define BACKWARD 0
+#define FORWARD 0
+#define BACKWARD 1
 
 #define TRIG_PIN PD0
 #define ECHO_PIN PD3
 
+#define STOP_DISTANCE 13
+
 enum states_e {
-    IDLE,
-    SEARCH_TARGET,
-    DRIVE_TO_TARGET_1,
-    DRIVE_TO_TARGET_2,
+    STATE_IDLE,
+    STATE_SEARCH_TARGET,
+    STATE_DRIVE_TO_TARGET_1,
+    STATE_DRIVE_TO_TARGET_2,
 };
 
 uint16_t global_time_target_led_frequency[2];
@@ -67,7 +69,7 @@ void ext_int1_init() {
 
 float calculateDistance(uint16_t pulseWidth) {
     // Calculate distance in cm
-    float distance = pulseWidth * 0.0343 * 8 / 2; // distance in cm
+    float distance = pulseWidth* 0.0343 * 8  / 2; // distance in cm
     return distance;
 }
 
@@ -86,11 +88,11 @@ void trigSensor() {
     risingEdge = 1; // Prepare to detect rising edge again
     //UART_send(pulseWidth);
     MCUCR |= (1 << ISC10); // Rising edge
-
+    
     overflowCount = 0; // Reset overflow count
 }
 
-void stopRobot() {
+uint16_t get_distance_to_target() {
     // without the first iterations before the distance is measured for the first time will trigger as distance < 8
     static char c = 0;
 
@@ -98,20 +100,17 @@ void stopRobot() {
     if (((distanceMeasured == 1) && (overflowCount > 30)) || (overflowCount > 500)) {
         trigSensor();
     }
-
-
+    
+    //UART_send(overflowCount);
+    
     float distance = calculateDistance(pulseWidth);
     //if(distance > 20) distance = 20;
     sei();
-
+    
     if (distance) c = 1;
-
-    if ((distance < 8) && c) {
-
-        PORTD &= ~(1 << PD5);
-    } else {
-        PORTD |= (1 << PD5);
-    }
+    
+    if(c) return distance;
+    else return 100;
 
     //UART_send(distance); 
 }
@@ -256,6 +255,7 @@ ISR(TIMER1_OVF_vect) {
 
 ISR(INT1_vect) {
     static uint8_t a;
+    
     if (risingEdge) {
         // Rising edge detected
         a = TCNT1; // read Timer1 value
@@ -277,7 +277,7 @@ ISR(INT1_vect) {
 /*
  * calculates how bright the flashing light is from each transistors POV
  */
-void get_flashing_led_brightness(unsigned char *edge_height) {
+void get_flashing_led_brightness(unsigned char *edge_height, unsigned char *target_detected) {
     static unsigned char mean[2] = {0, 0};
     // signed 16 bit, so that the substraction doesnt return a high result, if mean>transistor
     static int16_t transistor[2] = {0, 0};
@@ -363,7 +363,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
             r_l = 0;
         }
     }
-
+    
     // wenn gemessene zeit ~100ms -> blinken erkannt
     if (time[LEFT] >= 50 && time[LEFT] <= 150) {
 #ifdef DEBUG
@@ -413,7 +413,9 @@ int main(int argc, char** argv) {
     // define the pins of D2 and D3 as outputs
     DDRD |= (1 << PD5) | (1 << PD4);
     // turn on D2
-    PORTD |= (1 << PD4);
+    PORTD &= ~(1 << PD4);
+    _delay_ms(1000);
+    PORTD |= (1<<PD4);
 
     UART_init();
     ADC_init();
@@ -439,28 +441,46 @@ int main(int argc, char** argv) {
     int steer = P * p + I * i + D*d;
 
     unsigned char edge_height[2] = {0, 0};
+    unsigned char target_detected = false;
+    
+    uint16_t distance_to_target;
 
     unsigned char status_led_should_blink = false;
 
     enum states_e state;
-    state = SEARCH_TARGET;
+    state = STATE_SEARCH_TARGET;
+    
 
     while (1) {
 
         status_led_blink(status_led_should_blink);
 
-        get_flashing_led_brightness(edge_height);
+        get_flashing_led_brightness(edge_height, &target_detected);
+        
+        //stopRobot();
 
         switch (state) {
             // rotating until the target-light is found
-            case SEARCH_TARGET:
+            case STATE_SEARCH_TARGET:
+                Gangschaltung(FORWARD, BACKWARD);
+                Gaspedal(60, 100);
                 // no flashing led detected -> rotate left
-                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
-                    Gangschaltung(BACKWARD, FORWARD);
-                    Gaspedal(60, 70);
-                } else {
-                    // drive towards the flashing led, steered by a pid-regulator
-                    error = edge_height[LEFT] - edge_height[RIGHT];
+                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) break;
+                    
+                status_led_should_blink = true;
+                state = STATE_DRIVE_TO_TARGET_1;
+                
+                
+                break;
+
+            /*
+             * driving towards the target light ignoring black lines
+             * -> driving out of the starting zone
+             * go to state 2 shortly after a black line is detected
+             */
+            case STATE_DRIVE_TO_TARGET_1:
+                // drive towards the flashing led, steered by a pid-regulator
+                    /*error = edge_height[LEFT] - edge_height[RIGHT];
                     P = error;
                     I = I + error;
                     lastError = error;
@@ -483,16 +503,24 @@ int main(int argc, char** argv) {
                         if (steer > 127) steer = 100;
                         else if (steer < 0) steer = 0;
                         Gaspedal(127 + steer, 127 - steer);
-                    }
+                    }*/
+                
+                distance_to_target = get_distance_to_target();
+                if ((distance_to_target < 10)) {
+                    state = STATE_IDLE;
+                    Gaspedal(0,0);
+                    Gangschaltung(FORWARD, FORWARD);
+                    status_led_should_blink = false;
+                    break;
                 }
-                break;
-
-            /*
-             * driving towards the target light ignoring black lines
-             * -> driving out of the starting zone
-             * go to state 2 shortly after a black line is detected
-             */
-            case DRIVE_TO_TARGET_1:
+                
+                if (edge_height[LEFT] > edge_height[RIGHT]){
+                    Gangschaltung(FORWARD, FORWARD);
+                    Gaspedal(50, 90);
+                } else if(edge_height[LEFT] < edge_height[RIGHT]){
+                    Gangschaltung(FORWARD, FORWARD);
+                    Gaspedal(90, 50);
+                }
                 
                 break;
             
@@ -500,14 +528,17 @@ int main(int argc, char** argv) {
              * driving towards the target light, avoiding black lines
              * go to idle state if the distance to the target is small enough
              */
-            case DRIVE_TO_TARGET_2:
+            case STATE_DRIVE_TO_TARGET_2:
+                
                 
                 break;
                 
             /*
              * idle, does nothing
              */
-            case IDLE:
+            case STATE_IDLE:
+               
+                
                 break;
                 
             // catches random unintended states and reroutes them to state 0
