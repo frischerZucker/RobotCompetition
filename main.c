@@ -10,7 +10,6 @@
 #define F_CPU 8000000L
 #include <avr/delay.h>
 #include <avr/interrupt.h>
-#include <stdint-gcc.h>
 
 // if defined, debug info is send via UART
 //#define DEBUG
@@ -62,6 +61,7 @@ enum states_e {
 
 uint16_t global_time_target_led_frequency[2];
 uint16_t time_status_led;
+
 uint16_t ms_since_last_second;
 uint16_t seconds_since_start;
 
@@ -106,7 +106,7 @@ uint16_t get_distance_to_target() {
     static char c = 0;
 
     cli();
-    if (((distanceMeasured == 1) && (overflowCount > 30)) || (overflowCount > 250)) {
+    if (((distanceMeasured == 1) && (overflowCount > 30)) || (overflowCount > 500)) {
         trigSensor();
     }
 
@@ -137,7 +137,7 @@ void init_M(void) {
 
 void Gangschaltung(char richtung_L, char richtung_R) {
 
-    // 1 = vorw�rts    0 = r�ckw�rts
+    // 1 = vorw?rts    0 = r?ckw?rts
     if (richtung_L == 0) {
         PORTD &= ~(1 << PD6);
     } else {
@@ -260,7 +260,7 @@ ISR(TIMER1_OVF_vect) {
     overflowCount++;
 
     time_status_led += 1;
-    
+
     ms_since_last_second += 2;
 }
 
@@ -314,8 +314,8 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     // detecting rising / falling edges on the left transistor
     if (transistor[LEFT] > mean[LEFT]) {
         l_h += 1;
-        l_l = 0; // setzt rauschabblockung f�r low zur�ck, weil ein high kam
-        // wird nur als high erkannt, wenn mehrmals am st�ck high gewesen -> blockt rauschen ab
+        l_l = 0; // setzt rauschabblockung f?r low zur?ck, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am st?ck high gewesen -> blockt rauschen ab
         if (l_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[LEFT]) {
@@ -330,7 +330,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     } else {
         l_l += 1;
         l_h = 0;
-        // wird nur als low erkannt, wenn mehrmals am st�ck low gewesen -> blockt rauschen ab
+        // wird nur als low erkannt, wenn mehrmals am st?ck low gewesen -> blockt rauschen ab
         if (l_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[LEFT]) {
@@ -346,8 +346,8 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     // detecting rising / falling edges on the right transistor
     if (transistor[RIGHT] > mean[RIGHT]) {
         r_h += 1;
-        r_l = 0; // setzt rauschabblockung f�r low zur�ck, weil ein high kam
-        // wird nur als high erkannt, wenn mehrmals am st�ck high gewesen -> blockt rauschen ab
+        r_l = 0; // setzt rauschabblockung f?r low zur?ck, weil ein high kam
+        // wird nur als high erkannt, wenn mehrmals am st?ck high gewesen -> blockt rauschen ab
         if (r_h == 5) {
             // wenn davor low gewesen (steigende flanke) -> zeitmessung starten
             if (!timer_started[RIGHT]) {
@@ -362,7 +362,7 @@ void get_flashing_led_brightness(unsigned char *edge_height) {
     } else {
         r_l += 1;
         r_h = 0;
-        // wird nur als low erkannt, wenn mehrmals am st�ck low gewesen -> blockt rauschen ab
+        // wird nur als low erkannt, wenn mehrmals am st?ck low gewesen -> blockt rauschen ab
         if (r_l == 5) {
             // wenn vorher high gewesen (fallende flanke) -> zeit auslesen
             if (timer_started[RIGHT]) {
@@ -467,6 +467,10 @@ int main(int argc, char** argv) {
     uint16_t left_sensor_value = 0;
     uint16_t right_sensor_value = 0;
 
+    unsigned char already_tried_unstuck_v1 = false;
+
+    seconds_since_start = 0;
+
     while (1) {
 
         status_led_blink(status_led_should_blink);
@@ -476,7 +480,8 @@ int main(int argc, char** argv) {
         right_sensor_value = ADC_get_value(SENSOR_RIGHT);
 
         //stopRobot();
-        if(ms_since_last_second >= 1000){
+
+        if (ms_since_last_second >= 1000) {
             ms_since_last_second = 0;
             seconds_since_start += 1;
         }
@@ -535,6 +540,17 @@ int main(int argc, char** argv) {
                     Gaspedal(127 + steer, 127 - steer);
                 }*/
 
+                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
+                    state = STATE_TARGET_LOST;
+                    break;
+                }
+
+                if (seconds_since_start > 40) {
+                    state = STATE_DRIVE_TO_TARGET_2;
+                    seconds_since_start = 0;
+                    break;
+                }
+
                 // stops if close to the target
                 distance_to_target = get_distance_to_target();
                 if ((distance_to_target < STOP_DISTANCE)) {
@@ -542,21 +558,6 @@ int main(int argc, char** argv) {
                     Gaspedal(0, 0);
                     Gangschaltung(FORWARD, FORWARD);
                     status_led_should_blink = false;
-                    break;
-                }
-                
-                // unstuck the robot
-                if (seconds_since_start >= 20) {
-                    state = STATE_DRIVE_TO_TARGET_2;
-                    Gaspedal(0, 0);
-                    Gangschaltung(FORWARD, FORWARD);
-                    seconds_since_start = 0;
-
-                    break;
-                }
-                
-                if ((edge_height[LEFT] < EDGE_HEIGHT_THRESHOLD) && (edge_height[RIGHT] < EDGE_HEIGHT_THRESHOLD)) {
-                    state = STATE_TARGET_LOST;
                     break;
                 }
 
@@ -581,11 +582,11 @@ int main(int argc, char** argv) {
                     //Gaspedal(90, 50);
                 }
 
-                if(distance_to_target <= 32){
+                if (distance_to_target <= 32) {
                     Gaspedal(speed[LEFT], speed[RIGHT]);
                     break;
                 }
-                
+
                 // avoiding black lines
                 if (right_sensor_value < Black_Line_Value) {
                     // Both sensors detect black line, go case 2
@@ -613,16 +614,42 @@ int main(int argc, char** argv) {
                  * go to idle state if the distance to the target is small enough
                  */
             case STATE_DRIVE_TO_TARGET_2:
-                Gangschaltung(BACKWARD, BACKWARD);
-                Gaspedal(50, 80);
-                
-                if (seconds_since_start >= 2) {
-                    state = STATE_SEARCH_TARGET;
+                if (seconds_since_start < 1) {
+                    Gangschaltung(BACKWARD, BACKWARD);
+                    Gaspedal(70, 0);
+                } else if (seconds_since_start < 2) {
+                    Gaspedal(60, 60);
+                } else {
                     Gaspedal(0, 0);
-                    Gangschaltung(FORWARD, FORWARD);
+                    state = STATE_SEARCH_TARGET;
                     seconds_since_start = 0;
-
+                    already_tried_unstuck_v1 = true;
                     break;
+                }
+
+                if (!already_tried_unstuck_v1) break;
+
+                if (seconds_since_start < 3) {
+                    // avoiding black lines
+                    if (right_sensor_value < Black_Line_Value) {
+                        // Both sensors detect black line, go case 2
+                        Gangschaltung(FORWARD, FORWARD);
+                        speed[LEFT] = 127;
+                        speed[RIGHT] = 0;
+                    }
+                    if (left_sensor_value < Black_Line_Value) {
+                        Gangschaltung(FORWARD, FORWARD);
+                        speed[RIGHT] = 120;
+                        speed[LEFT] = 0;
+                    }
+                    if ((left_sensor_value < Black_Line_Value) && (right_sensor_value < Black_Line_Value)) {
+                        Gangschaltung(BACKWARD, BACKWARD);
+                        speed[LEFT] = 67;
+                        speed[RIGHT] = 60;
+                    }
+                } else {
+                    seconds_since_start = 0;
+                    already_tried_unstuck_v1 = false;
                 }
 
                 break;
@@ -642,4 +669,3 @@ int main(int argc, char** argv) {
         }
     }
 }
-
